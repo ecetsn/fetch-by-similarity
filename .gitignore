@@ -49,3 +49,6 @@ virtualenv
 # Remote-submission artifacts
 ek.lpk
 submission_remote/__pycache__/
+
+temp
+example

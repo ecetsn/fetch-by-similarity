@@ -8,12 +8,12 @@
 // This software is licensed under the terms of the Apache License v2.
 // See the file LICENSE.md for details.
 //============================================================================
-#include <string>
 #include <filesystem>
-#include <iostream>
 #include <fstream>
-#include <vector>
+#include <iostream>
 #include <set>
+#include <string>
+#include <vector>
 
 template<typename T>
 std::vector<T> vector_union(std::vector<std::vector<T> >& vecs)
@@ -80,9 +80,6 @@ std::vector<std::vector<std::vector<double> > > transpose_matrix(
   auto n_ctxt_per_row = (mat.size() + n_slots - 1) / n_slots;
   auto record_dim = mat[0].size();
 
-  //  std::cout << "n_ctxt_per_row=" << n_ctxt_per_row
-  //            << ", record_dim=" << record_dim << std::endl;
-
   // Allocate space
   std::vector<std::vector<std::vector<double>>> transposed(n_ctxt_per_row);
   for (auto& batch : transposed) {
@@ -109,42 +106,87 @@ std::vector<std::vector<std::vector<double> > > transpose_matrix(
   return transposed;  // return the encoded matrix
 }
 
-/// Store the accumulated time in a JSON file
-inline void store_server_time(std::filesystem::path fname, int64_t compute, int64_t total) {
-  std::ofstream file(fname);
-  if (file.is_open()) {
-    file << "{\n";
-    file << "  \"Encrypted computation\": " << compute << ',' << std::endl;
-    file << "  \"Total\": " << total << std::endl;
-    file << "}\n";
-    file.close();
-  } else {
-    std::cerr << "Unable to open file " << fname << std::endl;
-  }
-}
-
 #include <chrono>
 #include <iomanip>
 #include <sstream>
-/// Returns the current time in the format H:M:S, and also duration since
-/// last call in seconds (or 0 if this is the first call, or reset==true).
-inline std::tuple<std::string,int64_t> getCurrentTimeFormatted(bool reset=false) {
-    using namespace std::chrono;
-    static std::chrono::system_clock::time_point previous;
-    auto now = system_clock::now();
-    auto now_c = system_clock::to_time_t(now);
+#include <tuple>
+#include <heongpu/heongpu.hpp>
+#include "params.cuh"
 
-    // Format hours, minutes, seconds
+/// Returns the current time in the format H:M:S, and also duration
+/// since last call in seconds (or 0 if this is the first call).
+inline std::pair<std::string, double> getCurrentTimeFormatted() {
+    using namespace std::chrono;
+    static system_clock::time_point previous;
+    auto now = system_clock::now();
+    auto now_c = std::time_t(system_clock::to_time_t(now));
+
     std::stringstream ss;
     ss << std::put_time(std::localtime(&now_c), "%H:%M:%S");
 
-    // If not the 1st call, also print duration
-    int64_t n_seconds = 0;
-    if (!reset && previous != system_clock::time_point{}) {
-      // Compute the duration between now and previous and report it
-      n_seconds = duration_cast<seconds>(now - previous).count();
+    double duration = -1.0;
+    if (previous != system_clock::time_point{}) {
+        duration = duration_cast<milliseconds>(now - previous).count() / 1000.0;
     }
     previous = now;
-    return std::make_pair(ss.str(), n_seconds);
+    return {ss.str(), duration};
 }
+
+// HEonGPU specific utilities
+void setup_he_context(InstanceSize size);
+void configure_memory_pool(float initial_fraction = 0.3f, float max_fraction = 0.9f);
+
+template <heongpu::Scheme SchemeType>
+void save_batch(const std::vector<heongpu::Ciphertext<SchemeType>>& batch, const std::string& filename) {
+    std::ofstream ofs(filename, std::ios::binary);
+    if (!ofs.is_open()) throw std::runtime_error("Cannot open " + filename + " for write");
+    uint64_t num_elements = static_cast<uint64_t>(batch.size());
+    ofs.write(reinterpret_cast<const char*>(&num_elements), sizeof(num_elements));
+    for (const auto& ct : batch) {
+        auto data = heongpu::serializer::serialize(ct);
+        uint64_t size = static_cast<uint64_t>(data.size());
+        ofs.write(reinterpret_cast<const char*>(&size), sizeof(size));
+        ofs.write(reinterpret_cast<const char*>(data.data()), size);
+    }
+}
+
+template <heongpu::Scheme SchemeType>
+void load_ciphertext(heongpu::Ciphertext<SchemeType>& ct, const std::string& filename) {
+    std::ifstream ifs(filename, std::ios::binary);
+    if (!ifs) throw std::runtime_error("Cannot open " + filename + " for read");
+    uint64_t size;
+    ifs.read(reinterpret_cast<char*>(&size), sizeof(size));
+    std::vector<uint8_t> buffer(size);
+    ifs.read(reinterpret_cast<char*>(buffer.data()), size);
+    
+    std::stringstream ss;
+    heongpu::serializer::from_buffer(ss, heongpu::serializer::decompress(buffer));
+    ct.load(ss);
+}
+
+template <heongpu::Scheme SchemeType>
+std::vector<heongpu::Ciphertext<SchemeType>> load_batch(const std::string& filename, std::shared_ptr<heongpu::HEContextImpl<SchemeType>> context) {
+    std::ifstream ifs(filename, std::ios::binary);
+    if (!ifs.is_open()) throw std::runtime_error("Cannot open " + filename + " for read");
+    uint64_t num_elements;
+    ifs.read(reinterpret_cast<char*>(&num_elements), sizeof(num_elements));
+    std::vector<heongpu::Ciphertext<SchemeType>> batch;
+    batch.reserve(num_elements);
+    for (uint64_t i = 0; i < num_elements; i++) {
+        uint64_t size;
+        ifs.read(reinterpret_cast<char*>(&size), sizeof(size));
+        std::vector<uint8_t> buffer(size);
+        ifs.read(reinterpret_cast<char*>(buffer.data()), size);
+        
+        std::stringstream ss;
+        heongpu::serializer::from_buffer(ss, heongpu::serializer::decompress(buffer));
+        heongpu::Ciphertext<SchemeType> ct(context);
+        ct.load(ss);
+        batch.push_back(std::move(ct));
+    }
+    return batch;
+}
+
+std::vector<int> build_q_bits(int depth);
+
 #endif  // ifdef FHEBENCH_UTILS_H_

@@ -39,13 +39,20 @@
 /// For a smaller depth bound B<D, the number of automorphisms is roughly
 /// B * (2^{ceil(D/B)} -1).
 
+#include <map>
 #include <vector>
-#include "openfhe.h"
+
+#include <heongpu/heongpu.hpp>
 
 class RunningSums {
 private:
-  lbcrypto::CryptoContext<lbcrypto::DCRTPoly> cc;
-  std::vector<std::map<int, lbcrypto::Plaintext>> masks;
+  heongpu::HEContext<heongpu::Scheme::CKKS> cc;
+  heongpu::HEOperator<heongpu::Scheme::CKKS>* op;
+  heongpu::HEEncoder<heongpu::Scheme::CKKS>* encoder;
+  heongpu::Galoiskey<heongpu::Scheme::CKKS>* galois_key;
+  // Raw mask slot vectors, keyed by rotation amount (negative).
+  // Re-encoded at the correct depth in eval_in_place.
+  std::vector<std::map<int, std::vector<double>>> mask_slots;
 
 public:
   /// @brief Initializing a new running-sum structure
@@ -54,19 +61,22 @@ public:
   /// @param depth_budget Mult-by-constant depth, defaults to log(n_slots/dtride)
   /// @param top_level Top level of input ciphertexts that would be input
   //                   to the eval method of this object (default=0)
-  explicit RunningSums(const lbcrypto::CryptoContext<lbcrypto::DCRTPoly>& cc,
+  explicit RunningSums(heongpu::HEContext<heongpu::Scheme::CKKS>& cc,
+      heongpu::HEOperator<heongpu::Scheme::CKKS>& op,
+      heongpu::HEEncoder<heongpu::Scheme::CKKS>& encoder,
+      heongpu::Galoiskey<heongpu::Scheme::CKKS>& galois_key,
       int stride=1, int depth_budget=0, int top_level=0);
 
   /// @brief Compute the running sums in-place
   /// @param ctxts The input/output ciphertexts
-  void eval_in_place(std::vector<lbcrypto::Ciphertext<lbcrypto::DCRTPoly> >& ctxts) const;
+  void eval_in_place(std::vector<heongpu::Ciphertext<heongpu::Scheme::CKKS> >& ctxts);
 
   /// A helper function that returns all the shift amounts,
   /// they can be fed into CryptoContext->EvalAtIndexKeyGen(...)
   std::vector<int> get_shift_amounts() const {
     std::vector<int> keys;
-    for (auto& phase_masks: masks) {
-      for (auto& kv : phase_masks) {
+    for (auto& phase : mask_slots) {
+      for (auto& kv : phase) {
         keys.push_back(kv.first);
       }
     }

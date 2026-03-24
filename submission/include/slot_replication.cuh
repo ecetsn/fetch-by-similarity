@@ -30,7 +30,7 @@
 #include <utility>
 #include <vector>
 
-#include "openfhe.h"
+#include <heongpu/heongpu.hpp>
 
 class ReplicatorNode;  // forward decleration
 
@@ -51,7 +51,10 @@ class DFSSlotReplicator {
   /// appears in the input ciphertext. This must divide the number of slots,
   /// and the pattern length is num_slots/input_replication. Default is 1
   /// (no repeated pattern)
-  explicit DFSSlotReplicator(lbcrypto::CryptoContext<lbcrypto::DCRTPoly>& cc,
+  explicit DFSSlotReplicator(heongpu::HEContext<heongpu::Scheme::CKKS>& context,
+                             heongpu::HEOperator<heongpu::Scheme::CKKS>& op,
+                             heongpu::HEEncoder<heongpu::Scheme::CKKS>& encoder,
+                             heongpu::Galoiskey<heongpu::Scheme::CKKS>& galois_key,
                              const std::vector<int> tree_degrees,
                              int input_replication = 1);
 
@@ -59,19 +62,24 @@ class DFSSlotReplicator {
   /// @param ct the ciphertext whose slots we want to replicate
   /// @return the first replicated ciphertext, with all the slots equal
   /// to the 1st slot of ct
-  lbcrypto::Ciphertext<lbcrypto::DCRTPoly> init(lbcrypto::Ciphertext<lbcrypto::DCRTPoly>& ct);
+  heongpu::Ciphertext<heongpu::Scheme::CKKS> init(
+      heongpu::Ciphertext<heongpu::Scheme::CKKS> ct);
 
   /// returns the next output ciphertext from the replication algorithm
-  lbcrypto::Ciphertext<lbcrypto::DCRTPoly> next_replica();
+  heongpu::Ciphertext<heongpu::Scheme::CKKS> next_replica();
 
   /// @brief Replicates each slot into a separate full ciphertext
   /// Parameters are the same as for the DFSSlotReplicator constructor.
   /// @return a vector of ciphertext of size equal to the length of the
   /// pattern in the input. All the slots in the i'th output are eual to
   /// the i'th input slot.
-  static std::vector<lbcrypto::Ciphertext<lbcrypto::DCRTPoly>> batch_replicate(
-      lbcrypto::Ciphertext<lbcrypto::DCRTPoly> ct, std::vector<int> tree_degrees,
-      int input_replication = 1);
+  static std::vector<heongpu::Ciphertext<heongpu::Scheme::CKKS>> batch_replicate(
+      heongpu::Ciphertext<heongpu::Scheme::CKKS> ct,
+      heongpu::HEContext<heongpu::Scheme::CKKS>& context,
+      heongpu::HEOperator<heongpu::Scheme::CKKS>& op,
+      heongpu::HEEncoder<heongpu::Scheme::CKKS>& encoder,
+      heongpu::Galoiskey<heongpu::Scheme::CKKS>& galois_key,
+      std::vector<int> tree_degrees, int input_replication = 1);
 
   // Helper methods
 

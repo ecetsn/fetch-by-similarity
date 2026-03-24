@@ -1,0 +1,24 @@
+{
+  "Timing": {
+    "Dataset generation": "0.2113s",
+    "Dataset preprocessing": "0.0053s",
+    "Key Generation": "123.6125s",
+    "Dataset encoding and encryption": "62.2754s",
+    "Encrypted dataset preprocessing": "0.009s",
+    "Query generation": "0.1892s",
+    "Query preprocessing": "0.0051s",
+    "Query encryption": "4.2982s",
+    "Encrypted computation": "26.8009s",
+    "Result decryption and postprocessing": "7.4399s",
+    "Total": "224.8468s"
+  },
+  "Bandwidth": {
+    "Public and evaluation keys": "1.5G",
+    "Encrypted database": "703.8M",
+    "Encrypted query": "5.2M"
+  },
+  "Server Reported": {
+    "compute_time_s": "2s",
+    "total_time_s": "6s"
+  }
+}
