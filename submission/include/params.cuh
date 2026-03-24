@@ -71,7 +71,7 @@ public:
         dbSize    = dbSizes[int(_size)];
 
         if (_size == InstanceSize::TOY) {
-            ringDim = 16384;
+            ringDim = 4096;
             multDepth = 25;
         } else {
             ringDim = 65536;

@@ -11,6 +11,9 @@ set(HEONGPU_ROOT $ENV{HOME}/HEonGPU)
 set(HEONGPU_BUILD ${HEONGPU_ROOT}/build)
 add_subdirectory(${HEONGPU_ROOT} ${HEONGPU_BUILD})
 
+find_package(OpenMP REQUIRED)
+
+
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -76,6 +79,7 @@ set(MY_EXECUTABLES
 )
 
 foreach(EXE ${MY_EXECUTABLES})
-    target_link_libraries(${EXE} PRIVATE heongpu CUDA::cudart)
+    target_link_libraries(${EXE} PRIVATE heongpu CUDA::cudart OpenMP::OpenMP_CXX)
 endforeach()
+
 
