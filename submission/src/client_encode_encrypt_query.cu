@@ -14,11 +14,6 @@
 
 using namespace heongpu;
 
-/**
- * client_encode_encrypt_query:
- * This executable reads the query file, replicates it into FHE slots,
- * and encrypts it using the public key.
- */
 int main(int argc, char* argv[]) {
     if (argc < 2) {
         std::cout << "Usage: " << argv[0] << " instance-size\n";
@@ -33,14 +28,12 @@ int main(int argc, char* argv[]) {
 
     // Load HE context and public key
     auto context = std::make_shared<HEContextImpl<Scheme::CKKS>>(
-        heongpu::serializer::load_from_file<HEContextImpl<Scheme::CKKS>>((prms.keydir() / "cc.bin").string()));
-    auto pk = heongpu::serializer::load_from_file<Publickey<Scheme::CKKS>>((prms.keydir() / "pk.bin").string());
+        load_from_file_raw<HEContextImpl<Scheme::CKKS>>((prms.keydir() / "cc.bin").string()));
+    auto pk = load_from_file_raw<Publickey<Scheme::CKKS>>((prms.keydir() / "pk.bin").string());
 
     HEEncoder<Scheme::CKKS> encoder(context);
     HEEncryptor<Scheme::CKKS> encryptor(context, pk);
 
-    // 1. Read Query
-    // Query is expected at [datadir]/query.bin
     auto qs = read2vecs<float>(prms.datadir() / "query.bin", prms.getRecordDim());
     if (qs.empty()) {
         throw std::runtime_error("Query file is empty");
@@ -57,15 +50,13 @@ int main(int argc, char* argv[]) {
     // Default scale for CKKS
     double scale = std::pow(2.0, 42); 
     
-    // 3. Encrypt Query
     Plaintext<Scheme::CKKS> pt(context);
     encoder.encode(pt, slots, scale);
     Ciphertext<Scheme::CKKS> eqry(context);
     encryptor.encrypt(eqry, pt);
     
-    // Save encrypted query to the encrypted directory
     std::filesystem::create_directories(prms.encdir());
-    heongpu::serializer::save_to_file(eqry, (prms.encdir() / "query.bin").string());
+    save_to_file_raw(eqry, (prms.encdir() / "query.bin").string());
 
     std::cout << "Query successfully encrypted and saved." << std::endl;
 

@@ -136,6 +136,56 @@ inline std::pair<std::string, double> getCurrentTimeFormatted() {
 void setup_he_context(InstanceSize size);
 void configure_memory_pool(float initial_fraction = 0.3f, float max_fraction = 0.9f);
 
+/**
+ * @brief Serialize an object to a raw byte buffer (no compression).
+ */
+template <typename T>
+std::vector<uint8_t> serialize_raw(const T& obj) {
+    std::stringstream ss;
+    obj.save(ss);
+    return heongpu::serializer::to_buffer(ss);
+}
+
+/**
+ * @brief Deserialize an object from a raw byte buffer (no decompression).
+ */
+template <typename T>
+void deserialize_raw(T& obj, const std::vector<uint8_t>& buffer) {
+    std::stringstream ss;
+    heongpu::serializer::from_buffer(ss, buffer);
+    obj.load(ss);
+}
+
+/**
+ * @brief Save a serializable object to a raw binary file.
+ */
+template <typename T>
+void save_to_file_raw(const T& obj, const std::string& filename) {
+    auto data = serialize_raw(obj);
+    uint64_t size = data.size();
+    std::ofstream ofs(filename, std::ios::binary);
+    if (!ofs) throw std::runtime_error("Cannot open " + filename + " for writing");
+    ofs.write(reinterpret_cast<const char*>(&size), sizeof(size));
+    ofs.write(reinterpret_cast<const char*>(data.data()), size);
+}
+
+/**
+ * @brief Load a serializable object from a raw binary file.
+ */
+template <typename T>
+T load_from_file_raw(const std::string& filename) {
+    std::ifstream ifs(filename, std::ios::binary);
+    if (!ifs) throw std::runtime_error("Cannot open " + filename + " for reading");
+    uint64_t size;
+    ifs.read(reinterpret_cast<char*>(&size), sizeof(size));
+    std::vector<uint8_t> buffer(size);
+    ifs.read(reinterpret_cast<char*>(buffer.data()), size);
+    
+    T obj;
+    deserialize_raw(obj, buffer);
+    return obj;
+}
+
 template <heongpu::Scheme SchemeType>
 void save_batch(const std::vector<heongpu::Ciphertext<SchemeType>>& batch, const std::string& filename) {
     std::ofstream ofs(filename, std::ios::binary);
@@ -143,7 +193,7 @@ void save_batch(const std::vector<heongpu::Ciphertext<SchemeType>>& batch, const
     uint64_t num_elements = static_cast<uint64_t>(batch.size());
     ofs.write(reinterpret_cast<const char*>(&num_elements), sizeof(num_elements));
     for (const auto& ct : batch) {
-        auto data = heongpu::serializer::serialize(ct);
+        auto data = serialize_raw(ct);
         uint64_t size = static_cast<uint64_t>(data.size());
         ofs.write(reinterpret_cast<const char*>(&size), sizeof(size));
         ofs.write(reinterpret_cast<const char*>(data.data()), size);
@@ -159,9 +209,7 @@ void load_ciphertext(heongpu::Ciphertext<SchemeType>& ct, const std::string& fil
     std::vector<uint8_t> buffer(size);
     ifs.read(reinterpret_cast<char*>(buffer.data()), size);
     
-    std::stringstream ss;
-    heongpu::serializer::from_buffer(ss, heongpu::serializer::decompress(buffer));
-    ct.load(ss);
+    deserialize_raw(ct, buffer);
 }
 
 template <heongpu::Scheme SchemeType>
@@ -178,15 +226,12 @@ std::vector<heongpu::Ciphertext<SchemeType>> load_batch(const std::string& filen
         std::vector<uint8_t> buffer(size);
         ifs.read(reinterpret_cast<char*>(buffer.data()), size);
         
-        std::stringstream ss;
-        heongpu::serializer::from_buffer(ss, heongpu::serializer::decompress(buffer));
         heongpu::Ciphertext<SchemeType> ct(context);
-        ct.load(ss);
+        deserialize_raw(ct, buffer);
         batch.push_back(std::move(ct));
     }
     return batch;
-}
 
-std::vector<int> build_q_bits(int depth);
+  }
 
 #endif  // ifdef FHEBENCH_UTILS_H_

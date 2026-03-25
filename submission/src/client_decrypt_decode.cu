@@ -30,8 +30,8 @@ int main(int argc, char* argv[]) {
 
     // Load context and secret key
     auto context = std::make_shared<HEContextImpl<Scheme::CKKS>>(
-        heongpu::serializer::load_from_file<HEContextImpl<Scheme::CKKS>>((prms.keydir() / "cc.bin").string()));
-    auto sk = heongpu::serializer::load_from_file<Secretkey<Scheme::CKKS>>((prms.keydir() / "sk.bin").string());
+        load_from_file_raw<HEContextImpl<Scheme::CKKS>>((prms.keydir() / "cc.bin").string()));
+    auto sk = load_from_file_raw<Secretkey<Scheme::CKKS>>((prms.keydir() / "sk.bin").string());
 
     HEDecryptor<Scheme::CKKS> decryptor(context, sk);
     HEEncoder<Scheme::CKKS> encoder(context);

@@ -52,55 +52,77 @@ RunningSums::RunningSums(heongpu::HEContext<heongpu::Scheme::CKKS>& _cc,
     }
 }
 
-void RunningSums::eval_in_place(std::vector<heongpu::Ciphertext<heongpu::Scheme::CKKS>>& ctxts) {
+void RunningSums::eval_in_place(
+    std::vector<heongpu::Ciphertext<heongpu::Scheme::CKKS>>& ctxts)
+{
     if (ctxts.empty()) return;
 
-    // 1. Vertical Prefix Sum across ciphertexts
+    // Step 1: vertical running sums across ciphertexts
+    // ctxts[i] <- ctxts[0] + ... + ctxts[i]
     for (size_t i = 1; i < ctxts.size(); i++) {
-        while (ctxts[i].depth() < ctxts[i - 1].depth()) op->mod_drop_inplace(ctxts[i]);
-        while (ctxts[i - 1].depth() < ctxts[i].depth()) op->mod_drop_inplace(ctxts[i - 1]);
+        while (ctxts[i].depth() < ctxts[i - 1].depth()) {
+            op->mod_drop_inplace(ctxts[i]);
+        }
+        while (ctxts[i - 1].depth() < ctxts[i].depth()) {
+            op->mod_drop_inplace(ctxts[i - 1]);
+        }
         op->add_inplace(ctxts[i], ctxts[i - 1]);
     }
 
-    // 2. Horizontal Running Sum within each ciphertext
-    // This part is same for all batches as they all share the same structure.
-    for (auto& phase_masks : mask_slots) {
-        // We need to compute the running sum within each ciphertext.
-        // For interleaved structure, the total sum of previous ciphertexts
-        // (at each slot) is already in ctxts[i-1] after step 1.
-        
-        // Compute running sum WITHIN the current "batch" logic
-        // acc will hold the sum of previous rows (horizontally)
-        std::vector<heongpu::Ciphertext<heongpu::Scheme::CKKS>> rotated_ctxts(ctxts.size(), cc);
-        bool first_phase = true;
-        
-        for (auto& [amt, mask_vec] : phase_masks) {
-            for (size_t i = 0; i < ctxts.size(); i++) {
-                heongpu::Ciphertext<heongpu::Scheme::CKKS> rotated(cc);
-                op->rotate_rows(ctxts[i], rotated, *galois_key, amt);
-                
-                heongpu::Plaintext<heongpu::Scheme::CKKS> mask_pt(cc);
-                encoder->encode(mask_pt, mask_vec, ctxts[i].scale());
-                while (mask_pt.depth() < rotated.depth()) op->mod_drop_inplace(mask_pt);
-                op->multiply_plain_inplace(rotated, mask_pt);
-                op->rescale_inplace(rotated);
-                
-                if (first_phase) {
-                    rotated_ctxts[i] = std::move(rotated);
-                } else {
-                    while (rotated_ctxts[i].depth() < rotated.depth()) op->mod_drop_inplace(rotated_ctxts[i]);
-                    while (rotated.depth() < rotated_ctxts[i].depth()) op->mod_drop_inplace(rotated);
-                    op->add_inplace(rotated_ctxts[i], rotated);
-                }
+    // Step 2: per-phase horizontal accumulation from ctxts.back() only
+    // Then add the SAME accumulator to every ciphertext
+    for (const auto& phase_masks : mask_slots) {
+        bool first_term = true;
+        heongpu::Ciphertext<heongpu::Scheme::CKKS> phase_acc(cc);
+
+        for (const auto& [amt, mask_vec] : phase_masks) {
+            // Rotate only the last ciphertext 
+            heongpu::Ciphertext<heongpu::Scheme::CKKS> rotated(cc);
+            op->rotate_rows(ctxts.back(), rotated, *galois_key, amt);
+
+            // Encode mask for this phase/rotation
+            heongpu::Plaintext<heongpu::Scheme::CKKS> mask_pt(cc);
+            encoder->encode(mask_pt, mask_vec, rotated.scale());
+
+            // Align levels before multiply_plain
+            while (mask_pt.depth() < rotated.depth()) {
+                op->mod_drop_inplace(mask_pt);
             }
-            first_phase = false;
+            while (rotated.depth() < mask_pt.depth()) {
+                op->mod_drop_inplace(rotated);
+            }
+
+            op->multiply_plain_inplace(rotated, mask_pt);
+            op->rescale_inplace(rotated);
+
+            if (first_term) {
+                phase_acc = std::move(rotated);
+                first_term = false;
+            } else {
+                while (phase_acc.depth() < rotated.depth()) {
+                    op->mod_drop_inplace(phase_acc);
+                }
+                while (rotated.depth() < phase_acc.depth()) {
+                    op->mod_drop_inplace(rotated);
+                }
+                op->add_inplace(phase_acc, rotated);
+            }
         }
 
-        // Add the partial sums back to each ciphertext
-        for (size_t i = 0; i < ctxts.size(); i++) {
-            while (ctxts[i].depth() < rotated_ctxts[i].depth()) op->mod_drop_inplace(ctxts[i]);
-            while (rotated_ctxts[i].depth() < ctxts[i].depth()) op->mod_drop_inplace(rotated_ctxts[i]);
-            op->add_inplace(ctxts[i], rotated_ctxts[i]);
+        if (!first_term) {
+            // Make a per-ciphertext copy so each ct gets the same logical accumulator
+            for (size_t i = 0; i < ctxts.size(); i++) {
+                heongpu::Ciphertext<heongpu::Scheme::CKKS> acc_i = phase_acc;
+
+                while (ctxts[i].depth() < acc_i.depth()) {
+                    op->mod_drop_inplace(ctxts[i]);
+                }
+                while (acc_i.depth() < ctxts[i].depth()) {
+                    op->mod_drop_inplace(acc_i);
+                }
+
+                op->add_inplace(ctxts[i], acc_i);
+            }
         }
     }
 }

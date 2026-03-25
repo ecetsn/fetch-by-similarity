@@ -30,10 +30,18 @@ def main():
                         help='Only count # of matches, do not return payloads')
     parser.add_argument('--remote', action='store_true',
                         help='Run example submission in remote backend mode')
+    parser.add_argument('--skip_setup', action='store_true',
+                        help="""Skip dataset generation, key generation, and DB encryption
+                        (steps 1-5, note that to use this make sure
+                        that the IO directory is not empty and created with the same seed)""")
+    parser.add_argument('--skip_query', action='store_true',
+                        help='Skip query generation and encryption (steps 6-8), reuse existing query')
+
 
     args, _ = parser.parse_known_args()
     size = args.size
     remote_be = args.remote
+    skip_setup = args.skip_setup
 
     # Use params.py to get instance parameters
     params = InstanceParams(size, args.count_only)
@@ -60,9 +68,10 @@ def main():
 
     # Remove and re-create IO directory
     io_dir = params.iodir()
-    if io_dir.exists():
-        subprocess.run(["rm", "-rf", str(io_dir)], check=True)
-    io_dir.mkdir(parents=True)
+    if not skip_setup:
+        if io_dir.exists():
+            subprocess.run(["rm", "-rf", str(io_dir)], check=True)
+        io_dir.mkdir(parents=True)
 
     if args.seed is not None:
         np.random.seed(args.seed)
@@ -78,50 +87,54 @@ def main():
         generic_seed = rng.integers(0,0x7fffffff)
         cmd_args.extend(["--seed", str(generic_seed)])
 
-    # 1. Client-side: Generate the datasets
-    utils.run_exe_or_python(harness_dir, "generate_dataset", *cmd_args)
-    utils.log_step(1, "Dataset generation")
+    if not skip_setup:
+        # 1. Client-side: Generate the datasets
+        utils.run_exe_or_python(harness_dir, "generate_dataset", *cmd_args)
+        utils.log_step(1, "Dataset generation")
 
-    # 1.1 Communication: Get cryptographic context
-    if remote_be:
-        utils.run_exe_or_python(exec_dir, "server_get_params", str(size))
-        utils.log_step(1.1 , "Communication: Get cryptographic context")
+        # 1.1 Communication: Get cryptographic context
+        if remote_be:
+            utils.run_exe_or_python(exec_dir, "server_get_params", str(size))
+            utils.log_step(1.1 , "Communication: Get cryptographic context")
 
-    # 2. Client-side: Preprocess the dataset using client_preprocess_dataset
-    utils.run_exe_or_python(exec_dir, "client_preprocess_dataset", *cmd_args)
-    utils.log_step(2, "Dataset preprocessing")
+        # 2. Client-side: Preprocess the dataset using client_preprocess_dataset
+        utils.run_exe_or_python(exec_dir, "client_preprocess_dataset", *cmd_args)
+        utils.log_step(2, "Dataset preprocessing")
 
-    # 3. Client-side: Generate the cryptographic keys
-    # Note: this does not use the rng seed above, it lets the implementation
-    #   handle its own prg needs. It means that even if called with the same
-    #   seed multiple times, the keys and ciphertexts will still be different.
-    utils.run_exe_or_python(exec_dir, "client_key_generation", *cmd_args)
-    utils.log_step(3, "Key Generation")
+        # 3. Client-side: Generate the cryptographic keys
+        # Note: this does not use the rng seed above, it lets the implementation
+        #   handle its own prg needs. It means that even if called with the same
+        #   seed multiple times, the keys and ciphertexts will still be different.
+        utils.run_exe_or_python(exec_dir, "client_key_generation", *cmd_args)
+        utils.log_step(3, "Key Generation")
 
-    # Report size of keys
-    utils.log_size(io_dir / "keys", "Public and evaluation keys")
+        # Report size of keys
+        utils.log_size(io_dir / "keys", "Public and evaluation keys")
 
-    # 3.1 Communication: Upload evaluation key
-    if remote_be:
-        utils.run_exe_or_python(exec_dir, "server_upload_ek", str(size))
-        utils.log_step(3.1 , "Communication: Upload evaluation key")
+        # 3.1 Communication: Upload evaluation key
+        if remote_be:
+            utils.run_exe_or_python(exec_dir, "server_upload_ek", str(size))
+            utils.log_step(3.1 , "Communication: Upload evaluation key")
 
-    # 4. Client-side: Encode and encrypt the dataset
-    utils.run_exe_or_python(exec_dir, "client_encode_encrypt_db", *cmd_args)
-    utils.log_step(4, "Dataset encoding and encryption")
+        # 4. Client-side: Encode and encrypt the dataset
+        utils.run_exe_or_python(exec_dir, "client_encode_encrypt_db", *cmd_args)
+        utils.log_step(4, "Dataset encoding and encryption")
 
-    # Report size of encrypted data
-    utils.log_size(io_dir / "encrypted", "Encrypted database")
+        # Report size of encrypted data
+        utils.log_size(io_dir / "encrypted", "Encrypted database")
 
-    # 4.1 Communication: Upload encrypted database
-    if remote_be:
-        utils.run_exe_or_python(exec_dir, "server_upload_db", str(size))
-        utils.log_step(4.1 , "Communication: Upload encrypted database")
+        # 4.1 Communication: Upload encrypted database
+        if remote_be:
+            utils.run_exe_or_python(exec_dir, "server_upload_db", str(size))
+            utils.log_step(4.1 , "Communication: Upload encrypted database")
 
 
-    # 5. Server-side: Preprocess the encrypted dataset using server_preprocess_dataset
-    utils.run_exe_or_python(exec_dir, "server_preprocess_dataset", *cmd_args)
-    utils.log_step(5, "Encrypted dataset preprocessing")
+        # 5. Server-side: Preprocess the encrypted dataset using server_preprocess_dataset
+        utils.run_exe_or_python(exec_dir, "server_preprocess_dataset", *cmd_args)
+        utils.log_step(5, "Encrypted dataset preprocessing")
+    else:
+        print("         [harness] Skipping steps 1-5 (DB encoding and encryption, key generation)")
+
 
     # Run steps 6-11 multiple times if requested
     for run in range(args.num_runs):
@@ -129,21 +142,29 @@ def main():
             print(f"\n         [harness] Run {run+1} of {args.num_runs}")
 
         # 6. Client-side: Generate a new random query using generate_query.py
-        this_query_args = query_args
-        if args.seed is not None:  # Use dervied seed if seed argument is provided
-            genqry_seed = rng.integers(0,0x7fffffff)
-            this_query_args.extend(["--seed", str(genqry_seed)])
-        utils.run_exe_or_python(harness_dir, "generate_query", *this_query_args)
-        utils.log_step(6, "Query generation")
+        if not args.skip_query:
+            this_query_args = query_args
+            if args.seed is not None:  # Use dervied seed if seed argument is provided
+                genqry_seed = rng.integers(0,0x7fffffff)
+                this_query_args.extend(["--seed", str(genqry_seed)])
+            utils.run_exe_or_python(harness_dir, "generate_query", *this_query_args)
+            utils.log_step(6, "Query generation")
 
-        # 7. Client-side: preprocess query
-        utils.run_exe_or_python(exec_dir, "client_preprocess_query", *this_query_args)
-        utils.log_step(7, "Query preprocessing")
+            # 7. Client-side: preprocess query
+            utils.run_exe_or_python(exec_dir, "client_preprocess_query", *this_query_args)
+            utils.log_step(7, "Query preprocessing")
 
-        # 8. Client-side: Encrypt the query
-        utils.run_exe_or_python(exec_dir, "client_encode_encrypt_query", *this_query_args)
-        utils.log_step(8, "Query encryption")
-        utils.log_size(io_dir / "encrypted" / "query.bin" , "Encrypted query")
+            # 8. Client-side: Encrypt the query
+            utils.run_exe_or_python(exec_dir, "client_encode_encrypt_query", *this_query_args)
+            utils.log_step(8, "Query encryption")
+            utils.log_size(io_dir / "encrypted" / "query.bin" , "Encrypted query")
+        else:
+            print("         [harness] Skipping steps 6-8 (reusing existing query)")
+            this_query_args = query_args
+            if args.seed is not None:
+                # We still need to advance the RNG to keep it consistent if num_runs > 1
+                _ = rng.integers(0, 0x7fffffff)
+
 
         # 9. Server-side: run server_encrypted_compute
         utils.run_exe_or_python(exec_dir, "server_encrypted_compute", *this_query_args)

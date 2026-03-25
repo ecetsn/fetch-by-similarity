@@ -25,6 +25,7 @@ set(SHARED_SRCS
     src/running_sums.cu
 )
 
+# add_compile_definitions(DEBUG)
 
 add_executable(client_key_generation 
     src/client_key_generation.cu

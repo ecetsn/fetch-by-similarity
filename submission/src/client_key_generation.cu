@@ -3,6 +3,7 @@
 #include <cmath>
 #include <filesystem>
 #include <iostream>
+#include <numeric>
 #include <string>
 #include <vector>
 
@@ -16,11 +17,43 @@
 
 using namespace heongpu;
 
-/**
- * client_key_generation:
- * This executable generates the FHE keys (Secret, Public, Relinearization, and Galois)
- * required for the fetch-by-similarity workload.
- */
+namespace {
+
+constexpr int CKKS_SCALING_MOD_BITS = 42;
+constexpr int CKKS_FIRST_MOD_BITS   = 57;
+constexpr int MULT_DEPTH = 26;
+
+std::vector<int> special_primes_bits() {
+    return {60, 60, 60};
+}
+
+std::vector<int> build_q_bits(int mult_depth) {
+    std::vector<int> bits;
+    bits.reserve(mult_depth + 1);
+    bits.push_back(CKKS_FIRST_MOD_BITS);
+    for (int i = 0; i < mult_depth; ++i) {
+        bits.push_back(CKKS_SCALING_MOD_BITS);
+    }
+    return bits;
+}
+
+int sum_bits(const std::vector<int>& v) {
+    return std::accumulate(v.begin(), v.end(), 0);
+}
+}
+
+/*
+Recommended Modulus Sizes for 128-bit Security
+
+ Polynomial Degree (N)      Total Modulus Bit-Length (log2 Q)
+ -----------------------------------------------------------
+ 2^12  (4096)               ~109 bits
+ 2^13  (8192)               ~218 bits
+ 2^14  (16384)              ~438 bits
+ 2^15  (32768)              ~881 bits
+ 2^16  (65536)              ~1750 bits
+*/
+
 int main(int argc, char* argv[]) {
     if (argc < 2) {
         std::cout << "Usage: " << argv[0] << " instance-size [--count_only]\n";
@@ -30,33 +63,38 @@ int main(int argc, char* argv[]) {
 
     int size_int = std::stoi(argv[1]);
     bool count_only = (argc > 2 && std::string(argv[2]) == "--count_only");
+
     InstanceParams prms(static_cast<InstanceSize>(size_int), count_only);
     setup_he_context(prms.getSize());
 
-    // Security level: none for TOY (testing), sec128 for others
-    heongpu::sec_level_type sec = (prms.getSize() == InstanceSize::TOY)
-        ? heongpu::sec_level_type::none
-        : heongpu::sec_level_type::sec128;
+    const heongpu::sec_level_type sec =
+        (prms.getSize() == InstanceSize::TOY) ? heongpu::sec_level_type::none
+                                              : heongpu::sec_level_type::sec128;
 
-    // Build modulus chain bit sizes
-    auto q_bits = build_q_bits(prms.getMultDepth());
-    auto context = heongpu::GenHEContext<Scheme::CKKS>(sec);
+    const int mult_depth = MULT_DEPTH;
+
+    // maybe also different depth for different count_only?
+
+    auto q_bits = build_q_bits(mult_depth);
+    auto sp_bits = special_primes_bits();
+
+    auto context = heongpu::GenHEContext<heongpu::Scheme::CKKS>(sec);
     context->set_poly_modulus_degree(prms.getRingDim());
-    context->set_coeff_modulus_bit_sizes(q_bits, get_special_primes_bits());
+    context->set_coeff_modulus_bit_sizes(q_bits, sp_bits);
     context->generate();
 
-    HEKeyGenerator<Scheme::CKKS> keygen(context);
-    
-    // Generate Secret Key
-    Secretkey<Scheme::CKKS> secret_key(context);
+    context->print_parameters();
+    std::cout << "Total modulus bit-length: " << sum_bits(q_bits) << "\n";
+
+    HEKeyGenerator<heongpu::Scheme::CKKS> keygen(context);
+
+    Secretkey<heongpu::Scheme::CKKS> secret_key(context);
     keygen.generate_secret_key(secret_key);
-    
-    // Generate Public Key
-    Publickey<Scheme::CKKS> public_key(context);
+
+    Publickey<heongpu::Scheme::CKKS> public_key(context);
     keygen.generate_public_key(public_key, secret_key);
-    
-    // Generate Relinearization Key (used for multiplications)
-    Relinkey<Scheme::CKKS> relin_key(context);
+
+    Relinkey<heongpu::Scheme::CKKS> relin_key(context);
     keygen.generate_relin_key(relin_key, secret_key);
 
     // Identify all required rotation amounts for Galois Keys
@@ -82,7 +120,7 @@ int main(int argc, char* argv[]) {
         auto sum_rows_stride = prms.getNCols() * PAYLOAD_DIM;
         int log_stride = static_cast<int>(std::log2(prms.getNSlots() / sum_rows_stride));
         for (int i = 0; i < log_stride; ++i) {
-            all_rots.push_back((sum_rows_stride) << i);  // positive = left shift
+            all_rots.push_back((sum_rows_stride) << i); 
         }
     } else {
        // Rotations for global count accumulation
@@ -96,19 +134,18 @@ int main(int argc, char* argv[]) {
     std::sort(all_rots.begin(), all_rots.end());
     all_rots.erase(std::unique(all_rots.begin(), all_rots.end()), all_rots.end());
 
-    // Generate Galois Keys
-    Galoiskey<Scheme::CKKS> galois_key(context, all_rots);
+    Galoiskey<heongpu::Scheme::CKKS> galois_key(context, all_rots);
     keygen.generate_galois_key(galois_key, secret_key);
 
-    // Serialize keys to disk
     std::filesystem::create_directories(prms.keydir());
-    heongpu::serializer::save_to_file(*context, (prms.keydir() / "cc.bin").string());
-    heongpu::serializer::save_to_file(public_key, (prms.keydir() / "pk.bin").string());
-    heongpu::serializer::save_to_file(secret_key, (prms.keydir() / "sk.bin").string());
-    heongpu::serializer::save_to_file(relin_key, (prms.keydir() / "mk.bin").string()); // "mk" in benchmark terminology
-    heongpu::serializer::save_to_file(galois_key, (prms.keydir() / "rk.bin").string()); // "rk" in benchmark terminology
+    save_to_file_raw(*context, (prms.keydir() / "cc.bin").string());
+    save_to_file_raw(public_key, (prms.keydir() / "pk.bin").string());
+    save_to_file_raw(secret_key, (prms.keydir() / "sk.bin").string());
+    save_to_file_raw(relin_key,  (prms.keydir() / "mk.bin").string());
+    save_to_file_raw(galois_key, (prms.keydir() / "rk.bin").string());
 
-    std::cout << "Key generation completed. " << all_rots.size() << " rotation keys generated." << std::endl;
+    std::cout << "Key generation completed. " << all_rots.size()
+              << " rotation keys generated.\n";
 
     return 0;
 }

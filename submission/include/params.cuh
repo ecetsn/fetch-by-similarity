@@ -9,12 +9,7 @@
 
 namespace fs = std::filesystem;
 
-// The level budget for the running-sums procedure
 constexpr int RUNNING_SUM_LEVELS = 3;
-
-// CKKS modulus chain parameters
-constexpr int CKKS_SCALING_MOD_BITS = 42;    // scaling-modulus size
-constexpr int CKKS_FIRST_MOD_BITS = 57;      // first-modulus size
 
 // The payload slots contain numbers in the range [0,MAX_PAYLOAD_VAL]
 // with precision of 1/PAYLOAD_PRECISION
@@ -23,9 +18,6 @@ constexpr int PAYLOAD_PRECISION = 16;
 
 // The dimension of the payload vectors (currently fixed to 8)
 constexpr int PAYLOAD_DIM = 8;
-
-// Special primes used for Hybrid KeySwitching (appended to coeff modulus)
-inline std::vector<int> get_special_primes_bits() { return {60, 60, 60}; }
 
 // an enum for benchmark size
 enum InstanceSize {
@@ -49,8 +41,7 @@ class InstanceParams {
     bool count_only;
     int recordDim;  // dimension of the plaintext record
     int dbSize;     // number of records in the dataset
-    int ringDim;    // dimenion of the FHE ring
-    int multDepth;  // multiplicative depth
+    int ringDim;    // HE ring dimension
     std::vector<int> degrees;  // must multiply to the record dimension
     fs::path rootdir; // root of the submission dir structure (see below)
 
@@ -67,17 +58,21 @@ public:
         static const int recDims[] = { 128,   128,     256,      512};
         static const int dbSizes[] = {1000, 50000, 1000000, 20000000};
         
+        ringDim = (_size == InstanceSize::TOY)? 4096 : 65536;
         recordDim = recDims[int(_size)];
         dbSize    = dbSizes[int(_size)];
 
-        if (_size == InstanceSize::TOY) {
-            ringDim = 4096;
-            multDepth = 25;
-        } else {
-            ringDim = 65536;
-            multDepth = 25;
-        }
-
+        // NOTE: The degrees vector specifies the shape of the tree used by
+        // by the slot replicator. The entires must multiply to the record
+        // dimension, and for a given shape the slot-replicator consumes
+        // degrees.size() levels of mult-by-constant.
+        // In theory, given a depth bound d, the best shape of the tree should
+        // have been {dim/2^{d-1}, 2, ..., 2}, but in practice this is not
+        // what happens. Maybe due to multi-threading??
+        // Below are some fixed shapes for the different sizes. These are
+        // unlikely to be optimal, the optimal shape is likely dependent on
+        // the specific hardware platform. But at least for the larger sizes,
+        // the replication time should be insignificant.
         switch (_size) {
             case InstanceSize::LARGE:
                 degrees = {16, 8, 4};
@@ -94,17 +89,15 @@ public:
     bool isCountOnly() const { return count_only; }
     int getRecordDim() const { return recordDim; }
     int getDbSize() const { return dbSize; }
-    int getRingDim() const { return ringDim; }
-    int getMultDepth() const { return multDepth; }
     std::vector<int> getDegrees() const { return degrees; }
     int getNSlots() const { return ringDim/2; } 
 
     int getNCtxts() const {
         return (dbSize + getNSlots() - 1) / getNSlots();
     }
-
-    int getNCols() const { return (size == InstanceSize::TOY) ? 128 : 512; }
-    int getMaxNMatch() const { return 8; };
+    int getRingDim() const { return ringDim; }
+    int getNCols() const { return ringDim/128; }
+    int getMaxNMatch() const { return 64 / PAYLOAD_DIM; };
 
     fs::path rtdir() const  { return rootdir; }
     // Harness uses [root]/io/toy/keys, NOT [root]/toy/keys

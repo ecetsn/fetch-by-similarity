@@ -1,6 +1,9 @@
 #include "slot_replication.cuh"
 #include <algorithm>
+#include <cassert>
+#include <functional>
 #include <numeric>
+#include <stdexcept>
 
 using namespace heongpu;
 
@@ -25,6 +28,9 @@ public:
                    std::shared_ptr<ReplicatorNode> _parent, int _nreps, int _amt)
         : cc(_cc), op(&_op), encoder(&_encoder), galois_key(&_galois_key),
           parent(_parent), num_replicas(_nreps), current(_nreps), rot_amt(_amt) {
+        if (_nreps < 2) {
+            throw std::invalid_argument("degrees in the tree must all be >= 2");
+        }
         shifts.resize(num_replicas);
         generate_masks();
     }
@@ -35,6 +41,7 @@ public:
     void generate_masks() {
         int nslots = cc->get_poly_modulus_degree() / 2;
         int block_size = rot_amt * num_replicas;
+        assert(nslots % block_size == 0);  // pattern-size must divide evenly the # of slots
         int nblocks = nslots / block_size;
         masks.resize(num_replicas, Plaintext<Scheme::CKKS>(cc));
         for (int i = 0; i < num_replicas; i++) {
@@ -58,6 +65,9 @@ public:
     }
 
     Ciphertext<Scheme::CKKS> init(Ciphertext<Scheme::CKKS> ct) {
+        if (ct.size() == 0) {
+            return Ciphertext<Scheme::CKKS>();
+        }
         if (parent == nullptr) install_source(ct);
         else install_source(parent->init(ct));
         return next_replica();
@@ -103,7 +113,26 @@ DFSSlotReplicator::DFSSlotReplicator(HEContext<Scheme::CKKS>& context,
                                      const std::vector<int> tree_degrees,
                                      int input_replication) {
     int num_slots = context->get_poly_modulus_degree() / 2;
+    if (input_replication <= 0) {
+        throw std::runtime_error("input_replication must be at least 1");
+    }
+    if (num_slots % input_replication != 0) {
+        throw std::runtime_error("input_replication must divide the number of slots");
+    }
     int pattern_len = num_slots / input_replication;
+
+    // Verify that all degrees are > 1 and that their product times
+    // input_replication equals the number of slots.
+    auto max_element = *(std::max_element(tree_degrees.begin(), tree_degrees.end()));
+    if (max_element < 2) {
+        throw std::runtime_error("Tree degrees must be at least 2");
+    }
+    if (num_slots != input_replication *
+                         std::accumulate(tree_degrees.begin(), tree_degrees.end(),
+                                         1, std::multiplies<int>())) {
+        throw std::runtime_error("Tree degrees must multiply to the number of slots");
+    }
+
     std::shared_ptr<ReplicatorNode> current = nullptr;
     auto rot_amt = pattern_len;
     for (auto deg : tree_degrees) {
@@ -131,9 +160,14 @@ std::vector<Ciphertext<Scheme::CKKS>> DFSSlotReplicator::batch_replicate(
     Galoiskey<Scheme::CKKS>& galois_key,
     std::vector<int> tree_degrees, int input_replication) {
     DFSSlotReplicator replicator(context, op, encoder, galois_key, tree_degrees, input_replication);
+    int num_results = context->get_poly_modulus_degree() / (2 * input_replication);
     std::vector<Ciphertext<Scheme::CKKS>> result;
+    result.reserve(num_results);
     for (auto ct_i = replicator.init(ct); ct_i.size() != 0; ct_i = replicator.next_replica()) {
         result.push_back(ct_i);
+    }
+    if (int(result.size()) < num_results) {
+        throw std::runtime_error("Not enough replicas in the tree");
     }
     return result;
 }
@@ -141,12 +175,6 @@ std::vector<Ciphertext<Scheme::CKKS>> DFSSlotReplicator::batch_replicate(
 std::vector<int> DFSSlotReplicator::get_rotation_amounts(std::vector<int> tree_degrees) {
     std::vector<int> result;
     int total_reps = std::accumulate(tree_degrees.begin(), tree_degrees.end(), 1, std::multiplies<int>());
-    // This is a simplification. The actual amounts depend on the pattern length.
-    // However, KeyGen usually passes the same degrees.
-    // For TOY: pattern_len = 8192, input_replication=64? No.
-    // In params.cuh: NSlots=8192, RecordDim=128, input_replication=8192/128=64.
-    // pattern_len = 8192 / 64 = 128.
-    // degrees = {8, 4, 4}. 8*4*4 = 128. Correct.
     int rot_amt = std::accumulate(tree_degrees.begin(), tree_degrees.end(), 1, std::multiplies<int>());
     for (auto deg : tree_degrees) {
         rot_amt /= deg;

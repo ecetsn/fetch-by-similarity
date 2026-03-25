@@ -22,14 +22,6 @@
 using namespace heongpu;
 namespace fs = std::filesystem;
 
-// -----------------------------------------------------------------------------
-// Operator Wrapper to expose protected members
-// -----------------------------------------------------------------------------
-
-/**
- * HEArithmeticOperator's base class HEOperator has evaluate_poly as protected.
- * This wrapper exposes it for use in the server computation.
- */
 class PublicArithmeticOperator : public HEArithmeticOperator<Scheme::CKKS> {
 public:
     PublicArithmeticOperator(HEContext<Scheme::CKKS> context, HEEncoder<Scheme::CKKS>& encoder)
@@ -44,10 +36,6 @@ public:
 };
 
 using Polynomial = PublicArithmeticOperator::Polynomial;
-
-// -----------------------------------------------------------------------------
-// Logging and Utility
-// -----------------------------------------------------------------------------
 
 void log_server_step(int num, std::string name, double elapsed = -1.0) {
     auto [timestamp, _] = getCurrentTimeFormatted();
@@ -66,10 +54,6 @@ static double impulse(double x, double sigma = 0.04) {
     double x_over_sigma = x / sigma;
     return std::exp(-x_over_sigma * x_over_sigma / 2);
 }
-
-// -----------------------------------------------------------------------------
-// Polynomial Evaluation Wrapper
-// -----------------------------------------------------------------------------
 
 void evaluate_function_internal(PublicArithmeticOperator& op,
                                Ciphertext<Scheme::CKKS>& ct,
@@ -95,10 +79,6 @@ void evaluate_function(PublicArithmeticOperator& op,
 
     evaluate_function_internal(op, ct, poly, relin_key);
 }
-
-// -----------------------------------------------------------------------------
-// Core Processing Stages
-// -----------------------------------------------------------------------------
 
 std::vector<Ciphertext<Scheme::CKKS>> mat_vec_mult(fs::path encdir,
                                                    Ciphertext<Scheme::CKKS> qry,
@@ -181,8 +161,6 @@ Ciphertext<Scheme::CKKS> total_sums(const Ciphertext<Scheme::CKKS>& ct,
     int s = static_cast<int>(std::log2(prms.getNSlots() / period));
     int r = static_cast<int>(std::log2(period));
     Ciphertext<Scheme::CKKS> result = ct;
-    // Use POSITIVE rotation amount: HEonGPU positive = left cyclic shift,
-    // same convention as OpenFHE EvalRotate with positive argument.
     for (int i = s - 1; i >= 0; i--) {
         int rot_amount = 1 << (i + r);  // positive = left shift
         Ciphertext<Scheme::CKKS> tmp(cc);
@@ -191,10 +169,6 @@ Ciphertext<Scheme::CKKS> total_sums(const Ciphertext<Scheme::CKKS>& ct,
     }
     return result;
 }
-
-// -----------------------------------------------------------------------------
-// Main Execution
-// -----------------------------------------------------------------------------
 
 int main(int argc, char* argv[]) {
     if (argc < 2) {
@@ -209,12 +183,12 @@ int main(int argc, char* argv[]) {
     setup_he_context(prms.getSize());
 
     auto context = std::make_shared<HEContextImpl<Scheme::CKKS>>(
-        heongpu::serializer::load_from_file<HEContextImpl<Scheme::CKKS>>((prms.keydir() / "cc.bin").string()));
+        load_from_file_raw<HEContextImpl<Scheme::CKKS>>((prms.keydir() / "cc.bin").string()));
 
-    auto mk = heongpu::serializer::load_from_file<Relinkey<Scheme::CKKS>>((prms.keydir() / "mk.bin").string());
+    auto mk = load_from_file_raw<Relinkey<Scheme::CKKS>>((prms.keydir() / "mk.bin").string());
     mk.store_in_device();
 
-    auto rk = heongpu::serializer::load_from_file<Galoiskey<Scheme::CKKS>>((prms.keydir() / "rk.bin").string());
+    auto rk = load_from_file_raw<Galoiskey<Scheme::CKKS>>((prms.keydir() / "rk.bin").string());
     rk.store_in_device();
 
     HEEncoder<Scheme::CKKS> encoder(context);
@@ -237,7 +211,7 @@ int main(int argc, char* argv[]) {
     using Complex = complex_arithmetic::ComplexOperations<double>;
     auto start_poly = std::chrono::high_resolution_clock::now();
     double threshold = 0.8;
-    int sigmoid_degree = count_only ? 247 : 59;
+    int sigmoid_degree = count_only ? 247 : 119; // 59 -> 119 because 59 does not give enough precision
 
     double outscale = count_only ? 1.0 : 0.504;
     auto sigmoid_func = [threshold, outscale](double x) { return sigmoid(x - threshold, outscale); };
@@ -248,7 +222,7 @@ int main(int argc, char* argv[]) {
     // Pre-compute one impulse polynomial per equality-check target x_i = i/4 - 1.
     std::vector<Polynomial> impulse_polys;
     impulse_polys.reserve(prms.getMaxNMatch());
-    double impulse_sigma_val = 0.04;
+    double impulse_sigma_val = 0.02;
     for (int ii = 1; ii <= prms.getMaxNMatch(); ii++) {
         double tgt = ii / 4.0 - 1.0;  // map i in {1..8} to [-1,1] as per reference
         auto f = [tgt, impulse_sigma_val](Complex x) { return Complex(impulse(x.real() - tgt, impulse_sigma_val), 0.0); };
@@ -301,7 +275,7 @@ int main(int argc, char* argv[]) {
         }
     } else {
         // 3. Running Sums
-        // Deep-copy result before running sums mutates it.
+        // Deep-copy result before running sums mutates it
         std::vector<Ciphertext<Scheme::CKKS>> matches;
         matches.reserve(result.size());
         for (auto& ct : result) {
@@ -313,6 +287,7 @@ int main(int argc, char* argv[]) {
         RunningSums rs(context, op, encoder, rk, prms.getNCols(), RUNNING_SUM_LEVELS, result[0].depth());
         rs.eval_in_place(result);
 
+        // extra work done to increase the precision and decrease the noise on payload
         for (size_t i = 0; i < result.size(); i++) {
             while (matches[i].depth() < result[i].depth()) op.mod_drop_inplace(matches[i]);
             while (result[i].depth() < matches[i].depth()) op.mod_drop_inplace(result[i]);
@@ -340,21 +315,21 @@ int main(int argc, char* argv[]) {
             auto indicator = compare_to_number(result, impulse_polys[i - 1], op, mk);
 
             for (size_t k = 0; k < indicator.size(); k++) {
-                // 1. Square to kill side lobes at non-match positions.
+                // 1. Square to kill side lobes at non-match positions
                 op.multiply_inplace(indicator[k], indicator[k]);
                 op.relinearize_inplace(indicator[k], mk);
                 op.rescale_inplace(indicator[k]);
 
-                // 2. Clear background noise by masking with the match ciphertext.
-                // This eliminates the additive bias (+6) caused by the indicator's noise floor.
+                // 2. Clear background noise by masking with the match ciphertext
+                // This eliminates the additive bias (+6) caused by the indicator's noise floor
                 while (matches[k].depth() < indicator[k].depth()) op.mod_drop_inplace(matches[k]);
                 while (indicator[k].depth() < matches[k].depth()) op.mod_drop_inplace(indicator[k]);
                 op.multiply_inplace(indicator[k], matches[k]);
                 op.relinearize_inplace(indicator[k], mk);
                 op.rescale_inplace(indicator[k]);
 
-                // 3. Compensate for matches[k] intensity (approx 0.504).
-                // Scaling back to approx 1.0.
+                // 3. Compensate for matches[k] intensity (approx 0.504)
+                // Scaling back to approx 1.0
                 op.add_inplace(indicator[k], indicator[k]);
             }
 
@@ -405,7 +380,7 @@ int main(int argc, char* argv[]) {
                 auto replicated = total_sums(match_for_idx, prms, context, op, rk);
 
                 // Step d: plaintext mask — keep only rows (i-1)*PAYLOAD_DIM .. i*PAYLOAD_DIM-1
-                // in each column, zero everything else.
+                // in each column, zero everything else
                 std::vector<double> mask_vec(prms.getNSlots(), 0.0);
                 for (int ell = 0; ell < prms.getNSlots(); ell++) {
                     int row = ell / prms.getNCols();  // which row in the column layout
@@ -443,7 +418,7 @@ int main(int argc, char* argv[]) {
                << ", \"total_time_s\": " << total_s << "}\n";
         }
 
-        // Save accumulator using save_batch so client_decrypt_decode can load it via load_batch.
+        // Save accumulator using save_batch so client_decrypt_decode can load it via load_batch
         accumulator.store_in_host();
         cudaDeviceSynchronize();
         std::vector<Ciphertext<Scheme::CKKS>> result_vec;

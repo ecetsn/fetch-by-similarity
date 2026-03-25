@@ -17,11 +17,7 @@
 using namespace heongpu;
 namespace fs = std::filesystem;
 
-/**
- * client_encode_encrypt_db:
- * This executable reads the database and payload files, transposes/packs them into
- * FHE slots, and encrypts them using the public key.
- */
+
 int main(int argc, char* argv[]) {
     if (argc < 2) {
         std::cout << "Usage: " << argv[0] << " instance-size\n";
@@ -36,8 +32,8 @@ int main(int argc, char* argv[]) {
 
     // Load HE context and public key
     auto context = std::make_shared<HEContextImpl<Scheme::CKKS>>(
-        heongpu::serializer::load_from_file<HEContextImpl<Scheme::CKKS>>((prms.keydir() / "cc.bin").string()));
-    auto pk = heongpu::serializer::load_from_file<Publickey<Scheme::CKKS>>((prms.keydir() / "pk.bin").string());
+        load_from_file_raw<HEContextImpl<Scheme::CKKS>>((prms.keydir() / "cc.bin").string()));
+    auto pk = load_from_file_raw<Publickey<Scheme::CKKS>>((prms.keydir() / "pk.bin").string());
 
     HEEncoder<Scheme::CKKS> encoder(context);
     HEEncryptor<Scheme::CKKS> encryptor(context, pk);
@@ -67,7 +63,7 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    // Default scale for CKKS (matches 42-bit limbs)
+    // BM Scale
     double scale = std::pow(2.0, 42); 
 
     // 3. Encrypt and save batches
@@ -86,7 +82,7 @@ int main(int argc, char* argv[]) {
             encryptor.encrypt(ct, pt);
             std::stringstream ss;
             ss << "row_" << std::setw(4) << std::setfill('0') << j << ".bin";
-            heongpu::serializer::save_to_file(ct, (batch_dir / ss.str()).string());
+            save_to_file_raw(ct, (batch_dir / ss.str()).string());
         }
 
         if (!prms.isCountOnly()) {
