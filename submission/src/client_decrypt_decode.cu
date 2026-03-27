@@ -1,3 +1,11 @@
+// client_decrypt_decode.cu - Client decrypt and decode results (HEonGPU)
+//============================================================================
+// Copyright (c) 2025, Amazon Web Services
+// All rights reserved.
+//
+// This software is licensed under the terms of the Apache License v2.
+// See the file LICENSE.md for details.
+//============================================================================
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -37,20 +45,18 @@ int main(int argc, char* argv[]) {
     HEEncoder<Scheme::CKKS> encoder(context);
 
     std::string input_file = (prms.encdir() / "results.bin").string();
-    std::cout << "[debug] loading from " << input_file << std::endl;
     
     std::vector<Ciphertext<Scheme::CKKS>> result_cts;
-    try {
-        result_cts = load_batch<Scheme::CKKS>(input_file, context);
-    } catch (...) {
-        // Fallback for single ciphertext (e.g. query.bin or old results.bin)
-        Ciphertext<Scheme::CKKS> ct(context);
-        load_ciphertext(ct, input_file);
-        result_cts.push_back(std::move(ct));
-    }
     
+    result_cts = load_batch<Scheme::CKKS>(input_file, context);
+
     std::vector<std::vector<double>> all_slots;
-    for (auto& ct : result_cts) {
+    for (size_t i = 0; i < result_cts.size(); ++i) {
+        auto& ct = result_cts[i];
+ #ifdef DEBUG 
+        std::cout << "[debug] Decrypting CT " << i << " depth=" << ct.depth() 
+                  << ", level=" << ct.level() << std::endl;
+ #endif
         Plaintext<Scheme::CKKS> pt(context);
         decryptor.decrypt(pt, ct);
         std::vector<double> slots;
@@ -59,22 +65,12 @@ int main(int argc, char* argv[]) {
     }
     
     write2disk<double>(prms.encdir() / "raw-result.bin", all_slots);
-    
-    if (!all_slots.empty()) {
-        std::cout << "[debug] Decrypted first 10 similarity values of first batch:" << std::endl;
-        for (int i = 0; i < 10 && i < all_slots[0].size(); i++) {
-            std::cout << "  slot[" << i << "]: " << all_slots[0][i] << std::endl;
-        }
-    }
-    
-    if (count_only) {
-        // Assuming count_only implies a single ciphertext result, or that the sum is in the first slot of the first batch
-        if (!all_slots.empty() && !all_slots[0].empty()) {
-            std::cout << "[debug] sum of all slots: " << std::round(all_slots[0][0]) << std::endl;
-        } else {
-            std::cout << "[debug] No slots to sum for count_only mode." << std::endl;
-        }
-    }
 
+ #ifdef DEBUG   // Print first few values
+    std::cout << "[debug] First 10 values from raw-result.bin: " << std::endl;
+    for (int i = 0; i < std::min((size_t)10, all_slots[0].size()); ++i) {
+        std::cout << "[debug] all_slots[0][" << i << "] = " << all_slots[0][i] << std::endl;
+    }
+#endif
     return 0;
 }

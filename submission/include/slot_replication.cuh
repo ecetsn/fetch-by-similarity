@@ -1,6 +1,6 @@
-#ifndef SLOT_REPLICATION_H_
-#define SLOT_REPLICATION_H_
-/// slot-replication.h - a mechanism to replicate slots across ciphertexts
+#ifndef SLOT_REPLICATION_CUH_
+#define SLOT_REPLICATION_CUH_
+/// slot-replication.cuh - A mechanism to replicate slots across ciphertexts (HEonGPU)
 //============================================================================
 // Copyright (c) 2025, Amazon Web Services
 // All rights reserved.
@@ -103,4 +103,4 @@ class DFSSlotReplicator {
   /// @return a vector of degrees that can be fed to the constructor
   static std::vector<int> suggest_degrees(int num_outputs);
 };
-#endif  // SLOT_REPLICATION_H_
+#endif  // SLOT_REPLICATION_CUH_

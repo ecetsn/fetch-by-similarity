@@ -1,6 +1,13 @@
-#ifndef PARAMS_H_
-#define PARAMS_H_
-
+#ifndef PARAMS_CUH_
+#define PARAMS_CUH_
+// params.cuh - Parameters for fetch-by-similarity (HEonGPU)
+//============================================================================
+// Copyright (c) 2025, Amazon Web Services
+// All rights reserved.
+//
+// This software is licensed under the terms of the Apache License v2.
+// See the file LICENSE.md for details.
+//============================================================================
 #include <filesystem>
 #include <stdexcept>
 #include <string>
@@ -10,6 +17,11 @@
 namespace fs = std::filesystem;
 
 constexpr int RUNNING_SUM_LEVELS = 3;
+
+// CKKS parameters
+constexpr int CKKS_SCALING_MOD_BITS = 42;
+constexpr int CKKS_FIRST_MOD_BITS   = 57;
+constexpr int MULT_DEPTH = 26;
 
 // The payload slots contain numbers in the range [0,MAX_PAYLOAD_VAL]
 // with precision of 1/PAYLOAD_PRECISION
@@ -109,4 +121,4 @@ public:
     }
 };
 
-#endif  // ifdef PARAMS_H_
+#endif  // ifdef PARAMS_CUH_

@@ -1,6 +1,6 @@
-#ifndef RUNNING_SUMS_H_
-#define RUNNING_SUMS_H_
-/// running-sums.h - Computing the running sums acorss ciphertext slots
+#ifndef RUNNING_SUMS_CUH_
+#define RUNNING_SUMS_CUH_
+/// running-sums.cuh - Computing the running sums acorss ciphertext slots (HEonGPU)
 //============================================================================
 // Copyright (c) 2025, Amazon Web Services
 // All rights reserved.
@@ -88,7 +88,7 @@ public:
 
 
   // Helper function to convert from slots to matrix representation and back
-
+  
   /// Rearrange the matrix entries in slots that can be encrypted
   static std::vector< std::vector<double> > from_matrix_form(
         const std::vector<std::vector<double> >& matriv, size_t n_slots);
@@ -97,4 +97,4 @@ public:
   static std::vector< std::vector<double> > to_matrix_form(
         const std::vector<std::vector<double> >& slots, size_t n_cols);
 };
-#endif // #ifndef RUNNING_SUMS_H_
+#endif // #ifndef RUNNING_SUMS_CUH_

@@ -1,3 +1,11 @@
+// running-sums.cu - Compute running sums acorss ciphertext slots (HEonGPU)
+//============================================================================
+// Copyright (c) 2025, Amazon Web Services
+// All rights reserved.
+//
+// This software is licensed under the terms of the Apache License v2.
+// See the file LICENSE.md for details.
+//============================================================================
 #include "running_sums.cuh"
 #include <cmath>
 #include <iostream>
@@ -70,7 +78,7 @@ void RunningSums::eval_in_place(
     }
 
     // Step 2: per-phase horizontal accumulation from ctxts.back() only
-    // Then add the SAME accumulator to every ciphertext
+    // Then add the same accumulator to every ciphertext
     for (const auto& phase_masks : mask_slots) {
         bool first_term = true;
         heongpu::Ciphertext<heongpu::Scheme::CKKS> phase_acc(cc);
@@ -108,6 +116,10 @@ void RunningSums::eval_in_place(
                 op->add_inplace(phase_acc, rotated);
             }
         }
+#ifdef DEBUG
+        std::cout << "[debug] RunningSums phase complete, phase_acc depth: " << phase_acc.depth() 
+                  << ", level: " << phase_acc.level() << std::endl;
+#endif
 
         if (!first_term) {
             // Make a per-ciphertext copy so each ct gets the same logical accumulator

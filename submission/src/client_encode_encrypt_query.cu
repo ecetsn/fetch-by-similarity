@@ -1,3 +1,11 @@
+// client_encode_encrypt_query.cu - Client encode and encrypt query (HEonGPU)
+//============================================================================
+// Copyright (c) 2025, Amazon Web Services
+// All rights reserved.
+//
+// This software is licensed under the terms of the Apache License v2.
+// See the file LICENSE.md for details.
+//============================================================================
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -54,11 +62,11 @@ int main(int argc, char* argv[]) {
     encoder.encode(pt, slots, scale);
     Ciphertext<Scheme::CKKS> eqry(context);
     encryptor.encrypt(eqry, pt);
-    
+#ifdef DEBUG  
+    std::cout << "[debug] Encrypted query depth: " << eqry.depth() 
+              << ", level: " << eqry.level() << std::endl;
+#endif
     std::filesystem::create_directories(prms.encdir());
     save_to_file_raw(eqry, (prms.encdir() / "query.bin").string());
-
-    std::cout << "Query successfully encrypted and saved." << std::endl;
-
     return 0;
 }

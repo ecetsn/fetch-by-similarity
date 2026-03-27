@@ -1,6 +1,6 @@
-#ifndef FHEBENCH_UTILS_H_
-#define FHEBENCH_UTILS_H_
-// utils.h - Utility declerations for fetch-by-similarity
+#ifndef FHEBENCH_UTILS_CUH_
+#define FHEBENCH_UTILS_CUH_
+// utils.cuh - Utility declerations for fetch-by-similarity (HEonGPU)
 //============================================================================
 // Copyright (c) 2025, Amazon Web Services
 // All rights reserved.
@@ -71,7 +71,7 @@ template<typename T> void write2disk(
 /// we want to transpose, but the rows of the output cannot have dimension
 /// above n_slots. To accomodate input matrices with more than n_slots rows,
 /// the output is split into ceil(n/n_slots) matrices, each of dimension
-/// m-by-n_slots, where the rows of the last one may be padded with zeros.
+/// m-by-n_slots, where the rows of the last one may be padded with zeros
 template<typename T>
 std::vector<std::vector<std::vector<double> > > transpose_matrix(
     std::vector<std::vector<T> > &mat, size_t n_slots)
@@ -137,7 +137,7 @@ void setup_he_context(InstanceSize size);
 void configure_memory_pool(float initial_fraction = 0.3f, float max_fraction = 0.9f);
 
 /**
- * @brief Serialize an object to a raw byte buffer (no compression).
+ * @brief Serialize an object to a raw byte buffer (no compression)
  */
 template <typename T>
 std::vector<uint8_t> serialize_raw(const T& obj) {
@@ -147,7 +147,7 @@ std::vector<uint8_t> serialize_raw(const T& obj) {
 }
 
 /**
- * @brief Deserialize an object from a raw byte buffer (no decompression).
+ * @brief Deserialize an object from a raw byte buffer (no decompression)
  */
 template <typename T>
 void deserialize_raw(T& obj, const std::vector<uint8_t>& buffer) {
@@ -157,7 +157,7 @@ void deserialize_raw(T& obj, const std::vector<uint8_t>& buffer) {
 }
 
 /**
- * @brief Save a serializable object to a raw binary file.
+ * @brief Save a serializable object to a raw binary file
  */
 template <typename T>
 void save_to_file_raw(const T& obj, const std::string& filename) {
@@ -234,4 +234,4 @@ std::vector<heongpu::Ciphertext<SchemeType>> load_batch(const std::string& filen
 
   }
 
-#endif  // ifdef FHEBENCH_UTILS_H_
+#endif  // ifdef FHEBENCH_UTILS_CUH_

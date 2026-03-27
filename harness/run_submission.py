@@ -12,6 +12,7 @@ import argparse
 import subprocess
 import numpy as np
 import utils
+from utils import TextFormat
 from params import InstanceParams, TOY, LARGE, instance_name
 
 def main():
@@ -34,8 +35,6 @@ def main():
                         help="""Skip dataset generation, key generation, and DB encryption
                         (steps 1-5, note that to use this make sure
                         that the IO directory is not empty and created with the same seed)""")
-    parser.add_argument('--skip_query', action='store_true',
-                        help='Skip query generation and encryption (steps 6-8), reuse existing query')
 
 
     args, _ = parser.parse_known_args()
@@ -58,11 +57,11 @@ def main():
     harness_dir = params.rootdir/"harness"
     exec_dir = params.rootdir/ ("submission_remote/src" if remote_be else "submission")
 
-    print(f"\n[harness] Running submission for {instance_name(size,args.count_only)} dataset")
+    print(f"\n{utils.TextFormat.BOLD}[harness] Running submission for {instance_name(size,args.count_only)} dataset{utils.TextFormat.RESET}")
     if args.count_only:
-        print("          only counting matches")
+        print(f"{utils.TextFormat.BOLD}          only counting matches{utils.TextFormat.RESET}")
     else:
-        print("          returning matching payloads")
+        print(f"{utils.TextFormat.BOLD}          returning matching payloads{utils.TextFormat.RESET}")
 
     # 0. Generate the dataset (and centers) using generate_dataset.py
 
@@ -72,6 +71,16 @@ def main():
         if io_dir.exists():
             subprocess.run(["rm", "-rf", str(io_dir)], check=True)
         io_dir.mkdir(parents=True)
+    else:
+        # Verify that required files exist for skip_setup
+        required_dirs = [params.datadir(), io_dir / "keys", io_dir / "encrypted"]
+        missing = [str(d) for d in required_dirs if not d.exists()]
+        if missing:
+            print(f"{utils.TextFormat.RED}Error: --skip_setup was used but the following required directories are missing:{utils.TextFormat.RESET}")
+            for d in missing:
+                print(f"  - {d}")
+            print(f"{utils.TextFormat.YELLOW}Please run without --skip_setup first for the {instance_name(size, False)} dataset.{utils.TextFormat.RESET}")
+            sys.exit(1)
 
     if args.seed is not None:
         np.random.seed(args.seed)
@@ -133,37 +142,31 @@ def main():
         utils.run_exe_or_python(exec_dir, "server_preprocess_dataset", *cmd_args)
         utils.log_step(5, "Encrypted dataset preprocessing")
     else:
-        print("         [harness] Skipping steps 1-5 (DB encoding and encryption, key generation)")
+        print(f"{utils.TextFormat.YELLOW}         [harness] Skipping steps 1-5 (DB encoding and encryption, key generation){utils.TextFormat.RESET}")
 
 
     # Run steps 6-11 multiple times if requested
     for run in range(args.num_runs):
         if args.num_runs > 1:
-            print(f"\n         [harness] Run {run+1} of {args.num_runs}")
+            print(f"\n{utils.TextFormat.BOLD}         [harness] Run {run+1} of {args.num_runs}{utils.TextFormat.RESET}")
 
         # 6. Client-side: Generate a new random query using generate_query.py
-        if not args.skip_query:
-            this_query_args = query_args
-            if args.seed is not None:  # Use dervied seed if seed argument is provided
-                genqry_seed = rng.integers(0,0x7fffffff)
-                this_query_args.extend(["--seed", str(genqry_seed)])
-            utils.run_exe_or_python(harness_dir, "generate_query", *this_query_args)
-            utils.log_step(6, "Query generation")
+        this_query_args = list(query_args)
+        if args.seed is not None:  # Use dervied seed if seed argument is provided
+            genqry_seed = rng.integers(0,0x7fffffff)
+            this_query_args.extend(["--seed", str(genqry_seed)])
 
-            # 7. Client-side: preprocess query
-            utils.run_exe_or_python(exec_dir, "client_preprocess_query", *this_query_args)
-            utils.log_step(7, "Query preprocessing")
+        utils.run_exe_or_python(harness_dir, "generate_query", *this_query_args)
+        utils.log_step(6, "Query generation")
 
-            # 8. Client-side: Encrypt the query
-            utils.run_exe_or_python(exec_dir, "client_encode_encrypt_query", *this_query_args)
-            utils.log_step(8, "Query encryption")
-            utils.log_size(io_dir / "encrypted" / "query.bin" , "Encrypted query")
-        else:
-            print("         [harness] Skipping steps 6-8 (reusing existing query)")
-            this_query_args = query_args
-            if args.seed is not None:
-                # We still need to advance the RNG to keep it consistent if num_runs > 1
-                _ = rng.integers(0, 0x7fffffff)
+        # 7. Client-side: preprocess query
+        utils.run_exe_or_python(exec_dir, "client_preprocess_query", *this_query_args)
+        utils.log_step(7, "Query preprocessing")
+
+        # 8. Client-side: Encrypt the query
+        utils.run_exe_or_python(exec_dir, "client_encode_encrypt_query", *this_query_args)
+        utils.log_step(8, "Query encryption")
+        utils.log_size(io_dir / "encrypted" / "query.bin" , "Encrypted query")
 
 
         # 9. Server-side: run server_encrypted_compute
@@ -195,7 +198,7 @@ def main():
         submission_report_path = io_dir / "server_reported_steps.json"
         utils.save_run(run_path, submission_report_path)
 
-    print(f"\nAll steps completed for the {instance_name(size,args.count_only)} dataset!")
+    print(f"\n{utils.TextFormat.GREEN}All steps completed for the {instance_name(size,args.count_only)} dataset!{utils.TextFormat.RESET}")
 
 if __name__ == "__main__":
     main()

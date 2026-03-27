@@ -4,7 +4,6 @@ project(fetch_by_similarity_heongpu LANGUAGES CXX CUDA)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CUDA_STANDARD 17)
 
-
 find_package(CUDAToolkit REQUIRED)
 
 set(HEONGPU_ROOT $ENV{HOME}/HEonGPU)
@@ -24,8 +23,6 @@ set(SHARED_SRCS
     src/slot_replication.cu
     src/running_sums.cu
 )
-
-# add_compile_definitions(DEBUG)
 
 add_executable(client_key_generation 
     src/client_key_generation.cu

@@ -1,3 +1,11 @@
+// client_key_generation.cu - Client key generation (HEonGPU)
+//============================================================================
+// Copyright (c) 2025, Amazon Web Services
+// All rights reserved.
+//
+// This software is licensed under the terms of the Apache License v2.
+// See the file LICENSE.md for details.
+//============================================================================
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -19,10 +27,6 @@ using namespace heongpu;
 
 namespace {
 
-constexpr int CKKS_SCALING_MOD_BITS = 42;
-constexpr int CKKS_FIRST_MOD_BITS   = 57;
-constexpr int MULT_DEPTH = 26;
-
 std::vector<int> special_primes_bits() {
     return {60, 60, 60};
 }
@@ -36,10 +40,11 @@ std::vector<int> build_q_bits(int mult_depth) {
     }
     return bits;
 }
-
+#ifdef DEBUG
 int sum_bits(const std::vector<int>& v) {
     return std::accumulate(v.begin(), v.end(), 0);
 }
+#endif
 }
 
 /*
@@ -51,7 +56,7 @@ Recommended Modulus Sizes for 128-bit Security
  2^13  (8192)               ~218 bits
  2^14  (16384)              ~438 bits
  2^15  (32768)              ~881 bits
- 2^16  (65536)              ~1750 bits
+ 2^16  (65536)              ~1747 bits -> According to Table 5.2 of Bossuat et al., 2024
 */
 
 int main(int argc, char* argv[]) {
@@ -83,8 +88,10 @@ int main(int argc, char* argv[]) {
     context->set_coeff_modulus_bit_sizes(q_bits, sp_bits);
     context->generate();
 
+#ifdef DEBUG
     context->print_parameters();
     std::cout << "Total modulus bit-length: " << sum_bits(q_bits) << "\n";
+#endif
 
     HEKeyGenerator<heongpu::Scheme::CKKS> keygen(context);
 
@@ -143,9 +150,9 @@ int main(int argc, char* argv[]) {
     save_to_file_raw(secret_key, (prms.keydir() / "sk.bin").string());
     save_to_file_raw(relin_key,  (prms.keydir() / "mk.bin").string());
     save_to_file_raw(galois_key, (prms.keydir() / "rk.bin").string());
-
+#ifdef DEBUG
     std::cout << "Key generation completed. " << all_rots.size()
               << " rotation keys generated.\n";
-
+#endif
     return 0;
 }

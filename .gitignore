@@ -50,6 +50,5 @@ virtualenv
 ek.lpk
 submission_remote/__pycache__/
 
-temp
+reference
 example
-debug_runs_small_fixed-seed

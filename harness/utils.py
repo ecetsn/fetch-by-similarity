@@ -56,6 +56,7 @@ class TextFormat:
     BLUE = "\033[34m"
     RED = "\033[31m"
     PURPLE = "\033[35m"
+    CYAN = "\033[36m"
     RESET = "\033[0m"
 
 def log_step(step_num: float, step_name: str, start: bool = False):
@@ -126,21 +127,37 @@ def save_run(path: Path, submission_report_path: Path):
 
     _timestampsStr["Total"] = f"{round(sum(_timestamps.values()), 4)}s"
 
-    _timestampsRemote = {}
+    server_report = {}
+
     if submission_report_path.exists():
         with open(submission_report_path, "r") as f:
-            server_reported_times = json.load(f)
-            for step_name, time_str in server_reported_times.items():
-                _timestampsRemote[step_name] = f"{time_str}s"
-                print(f"{TextFormat.PURPLE}         [submission] {step_name}: {time_str}s{TextFormat.RESET}")
+            server_report = json.load(f)
 
+        print()
+        # Pretty print
+        print(f"{TextFormat.PURPLE}         [submission] Server Reported{TextFormat.RESET}")
+
+        sr = server_report.get("Server Reported", {})
+
+        print(f"{TextFormat.PURPLE}           Encrypted computation{TextFormat.PURPLE} : {TextFormat.PURPLE}{sr.get('Encrypted computation', 'N/A')}{TextFormat.RESET}")
+        print(f"{TextFormat.PURPLE}           I/O{TextFormat.PURPLE}                   : {TextFormat.PURPLE}{sr.get('I/O', 'N/A')}{TextFormat.RESET}")
+        print(f"{TextFormat.PURPLE}           Total{TextFormat.PURPLE}                 : {TextFormat.PURPLE}{sr.get('Total', 'N/A')}{TextFormat.RESET}")
+        print()
+        print(f"{TextFormat.PURPLE}           Breakdown:{TextFormat.PURPLE}")
+
+        breakdown = sr.get("Breakdown", {})
+        for k, v in breakdown.items(
+
+        ):
+            print(f"                {TextFormat.PURPLE}{k:<35}{TextFormat.PURPLE} : {TextFormat.PURPLE}{v}{TextFormat.RESET}")
+        print()
     json.dump({
         "Timing": _timestampsStr,
         "Bandwidth": _bandwidth,
-        "Server Reported": _timestampsRemote,
-    }, open(path,"w"), indent=2)
+        "Server Reported": server_report,
+    }, open(path, "w"), indent=2)
 
-    print("[total latency]", f"{round(sum(_timestamps.values()), 4)}s")
+    print(f"{TextFormat.BLUE}[Total Latency] {round(sum(_timestamps.values()), 4)}s{TextFormat.RESET}")
 
 def run_exe_or_python(base, file_name, *args, check=True):
     """

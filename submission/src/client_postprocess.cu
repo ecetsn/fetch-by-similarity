@@ -1,3 +1,11 @@
+// client_postprocess.cu - Client post-processing of encrypted results (HEonGPU)
+//============================================================================
+// Copyright (c) 2025, Amazon Web Services
+// All rights reserved.
+//
+// This software is licensed under the terms of the Apache License v2.
+// See the file LICENSE.md for details.
+//============================================================================
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -11,7 +19,7 @@
 
 using namespace heongpu;
 
-// The print outs are given to analys the effect of noise on the marker and on the payload values
+// Values are comming as [512, p1 / precision, p2 / precision, ...]
 
 static std::vector<std::vector<double>> to_matrix_form_local(const std::vector<std::vector<double>>& slots, size_t n_cols) {
     if (slots.empty() || slots[0].empty()) return {};
@@ -36,30 +44,44 @@ decode_results(const std::vector<double>& slots, int n_cols) {
         for (size_t i = 0; i < result_matrix.size(); i += PAYLOAD_DIM) {
             int marker = -1;
             double maxval = -1e20;
-            double second_maxval = -1e20;
-            int second_marker = -1;
 
             for (size_t ii = 0; ii < PAYLOAD_DIM; ii++) {
                 double val = result_matrix[i + ii][j];
                 if (val > maxval) {
-                    second_maxval = maxval;
-                    second_marker = marker;
                     maxval = val;
                     marker = static_cast<int>(ii);
-                } else if (val > second_maxval) {
-                    second_maxval = val;
-                    second_marker = static_cast<int>(ii);
                 }
             }
-
             // MAX_PAYLOAD_VAL = 256
-            // Markers are 512
+            // Markers wihtout scale (so maxval can be) : MAX_PAYLOAD_VAL * 2
             if (maxval > MAX_PAYLOAD_VAL) {
-                bool suspicious = (maxval < MAX_PAYLOAD_VAL * 1.4);
+                // Expected marker value (reference style)
+                double expected_marker = MAX_PAYLOAD_VAL * 2;
 
-                double scale =
-                    (MAX_PAYLOAD_VAL * 2 * PAYLOAD_PRECISION) /
-                    result_matrix[i + marker][j];
+                // Reject weak / suspicious marker
+                if (maxval < MAX_PAYLOAD_VAL * 1.4) {
+                    std::cerr << "BLOCK col = " << j
+                            << " block = " << (i / PAYLOAD_DIM)
+                            << ", maxval = " << maxval
+                            << ", ratio = " << (maxval / expected_marker) << "\n";
+                    std::stringstream ss;
+                    for (size_t k = 0; k < PAYLOAD_DIM; k++) {
+                        auto x = result_matrix[i + k][j];
+                        ss << x << ' ';
+                    }
+                    throw(std::runtime_error(
+                        "Marker not found in payload: [" + ss.str() + "]"));
+                }
+#ifdef DEBUG
+                std::cout << "BLOCK col = " << j
+                        << " block = " << (i / PAYLOAD_DIM)
+                        << ", maxval = " << maxval
+                        << ", ratio = " << (maxval / expected_marker)
+                        << "\n";
+#endif
+                // Scaling (M / M')
+                double scale = (MAX_PAYLOAD_VAL * 2 * PAYLOAD_PRECISION)  
+                                / (result_matrix[i + marker][j]);
 
                 std::vector<int16_t> rec(PAYLOAD_DIM - 1);
                 for (size_t k = 1; k < PAYLOAD_DIM; k++) {
@@ -68,33 +90,7 @@ decode_results(const std::vector<double>& slots, int n_cols) {
                         static_cast<int16_t>(std::round(scale * result_matrix[idx][j]));
                 }
 
-                auto print_block = [&](std::string status) {
-                    std::cerr << "BLOCK col = " << j
-                              << " block = " << (i / PAYLOAD_DIM)
-                              << " maxval = " << maxval
-                              << " ratio = " << (maxval / 512.0)
-                              << " status = " << status
-                              << " (2nd max = " << second_maxval << " at index " << second_marker << ")"
-                              << "\n";
-                };
-
-                if (suspicious) {
-                    print_block("SUSPICIOUS");
-                } else {
-                    print_block("STRONG");
-                }
-
                 obtained_vals.push_back(rec);
-            } else {
-                 if (maxval > 10.0) { // arbitrary threshold to avoid printing every zero slot if needed
-                     std::cerr << "BLOCK col = " << j
-                               << " block = " << (i / PAYLOAD_DIM)
-                               << " maxval = " << maxval
-                               << " ratio = " << (maxval / 512.0)
-                               << " status = SKIP"
-                               << " (2nd max = " << second_maxval << " at index " << second_marker << ")"
-                               << "\n";
-                 }
             }
         }
     }

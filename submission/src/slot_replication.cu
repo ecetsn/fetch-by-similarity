@@ -1,3 +1,11 @@
+// slot-replication.cu - A mechanism to replicate slots across ciphertexts (HEonGPU)
+//============================================================================
+// Copyright (c) 2025, Amazon Web Services
+// All rights reserved.
+//
+// This software is licensed under the terms of the Apache License v2.
+// See the file LICENSE.md for details.
+//============================================================================
 #include "slot_replication.cuh"
 #include <algorithm>
 #include <cassert>
@@ -102,6 +110,12 @@ public:
             op->add_inplace(acc, tmp);
         }
         current++;
+#ifdef DEBUG
+        if (current == 1) {
+            std::cout << "[debug] Replicator node next_replica depth: " << acc.depth() 
+                      << ", level: " << acc.level() << std::endl;
+        }
+#endif
         return acc;
     }
 };
@@ -196,7 +210,7 @@ std::vector<int> DFSSlotReplicator::get_degrees() {
     return result;
 }
 
-static bool isPowerOfTwo(int n) { return (n > 0) && ((n & (n - 1)) == 0); }
+inline bool isPowerOfTwo(int n) { return (n > 0) && ((n & (n - 1)) == 0); }
 
 std::vector<int> DFSSlotReplicator::suggest_degrees(int num_outputs) {
     assert(isPowerOfTwo(num_outputs));
